@@ -7,12 +7,16 @@ use ggez::timer;
 
 use glam::{IVec2, Vec2};
 
-use std::collections::{HashSet, LinkedList};
+use rand::Rng;
+
+use std::collections::{HashMap, LinkedList};
+use std::vec::Vec;
 
 const TARGET_FPS: u32 = 60;
 const STARTING_FRAME_DELAY: u8 = 12;
 const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
 const SCORE_STRIP: i32 = 4;
+const CIRCLE_TOLERANCE: f32 = 4.0;
 
 fn main() {
     let (tmp_ctx, _) = ContextBuilder::new("", "")
@@ -49,11 +53,13 @@ struct Game {
     buffered_direction: Option<Direction>,
     direction: Option<Direction>,
     frame_data: FrameData,
+    open_squares: Vec<IVec2>,
+    rng: rand::rngs::ThreadRng,
 }
 
 struct Snake {
     body: LinkedList<IVec2>,
-    set: HashSet<IVec2>,
+    occupied: HashMap<IVec2, u8>,
 }
 
 struct FrameData {
@@ -68,10 +74,12 @@ enum Direction {
 
 impl Snake {
     fn new(start_pos: IVec2) -> Self {
-        Self {
-            body: LinkedList::from([start_pos]),
-            set: HashSet::from([start_pos]),
-        }
+        let mut snake = Self {
+            body: LinkedList::new(),
+            occupied: HashMap::new(),
+        };
+        snake.grow(start_pos);
+        snake
     }
 
     fn head(&self) -> IVec2 {
@@ -84,12 +92,37 @@ impl Snake {
 
     fn grow(&mut self, pos: IVec2) {
         self.body.push_back(pos);
-        self.set.insert(pos);
+        for x in -1..=1 {
+            for y in -1..=1 {
+                let delta = glam::const_ivec2!([x, y]);
+                let new_pos = pos + delta;
+                let new_count = match self.occupied.get(&new_pos) {
+                    Some(count) => count + 1,
+                    _ => 1,
+                };
+                self.occupied.insert(new_pos, new_count);
+            }
+        }
     }
 
     fn shrink(&mut self) {
         let elem = self.body.pop_front().unwrap();
-        self.set.remove(&elem);
+        for x in -1..=1 {
+            for y in -1..=1 {
+                let delta = glam::const_ivec2!([x, y]);
+                let new_pos = elem + delta;
+                let count = *self.occupied.get(&new_pos).unwrap();
+                if count == 1 {
+                    self.occupied.remove(&new_pos);
+                } else {
+                    self.occupied.insert(new_pos, count - 1);
+                }
+            }
+        }
+    }
+
+    fn is_off_limits(&self, pos: IVec2) -> bool {
+        self.occupied.contains_key(&pos)
     }
 }
 
@@ -131,7 +164,21 @@ impl Game {
         } else {
             (ratio_x, Vec2::new(0.0, 0.0))
         };
-        Game {
+        let (mut x, mut y) = (0, 0);
+        let mut open_squares = Vec::new();
+        open_squares.resize_with(
+            DIMENSIONS.x as usize * DIMENSIONS.y as usize,
+            || {
+                let sq = IVec2::new(x, y);
+                x += 1;
+                if x >= DIMENSIONS.x {
+                    x = 0;
+                    y += 1;
+                }
+                sq
+            }
+        );
+        let mut game = Game {
             dim,
             top_left,
             score: 0,
@@ -143,6 +190,21 @@ impl Game {
             buffered_direction: None,
             direction: None,
             frame_data: FrameData::new(),
+            open_squares,
+            rng: rand::thread_rng(),
+        };
+        game.apple = game.gen_open_square();
+        game
+    }
+
+    fn gen_open_square(&mut self) -> IVec2 {
+        let index = self.rng.gen_range(0..self.open_squares.len());
+        let sq = self.open_squares[index];
+        if self.snake.is_off_limits(sq) {
+            self.open_squares.swap_remove(index);
+            self.gen_open_square()
+        } else {
+            sq
         }
     }
 }
@@ -209,14 +271,24 @@ impl EventHandler for Game {
                 new_head_y < 0 || new_head_y >= DIMENSIONS.y {
                 panic!("game over");
             }
-            self.snake.grow(IVec2::new(new_head_x, new_head_y));
-            self.snake.shrink();
+            let new_head = IVec2::new(new_head_x, new_head_y);
+            self.snake.grow(new_head);
+
+            // Apple collection
+            if new_head == self.apple {
+                self.apple = self.gen_open_square();
+            } else {
+                self.snake.shrink();
+            }
         }
         Ok(())
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, Color::from_rgb_u32(0x232528));
+        let radius = self.dim / 2.0;
+        let scale_vec = glam::const_vec2!([self.dim, self.dim]);
+        let center_dim = glam::const_vec2!([radius, radius]);
 
         // Draw play area
         let area = &Mesh::new_rectangle(
@@ -239,15 +311,15 @@ impl EventHandler for Game {
         // Draw the snake
         for pos in self.snake.iter() {
             let px_pos =
-                (*pos).as_vec2() * Vec2::new(self.dim, self.dim) + self.top_left;
+                (*pos).as_vec2() * scale_vec + self.top_left;
             let body = &Mesh::new_polygon(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
                 &[
-                    px_pos + Vec2::new(self.dim / 2.0, 0.0),
-                    px_pos + Vec2::new(self.dim, self.dim / 2.0),
-                    px_pos + Vec2::new(self.dim / 2.0, self.dim),
-                    px_pos + Vec2::new(0.0, self.dim / 2.0),
+                    px_pos + Vec2::new(radius, 0.0),
+                    px_pos + Vec2::new(self.dim, radius),
+                    px_pos + Vec2::new(radius, self.dim),
+                    px_pos + Vec2::new(0.0, radius),
                 ],
                 Color::GREEN,
             ).unwrap();
@@ -257,6 +329,21 @@ impl EventHandler for Game {
                 graphics::DrawParam::default(),
             )?;
         }
+
+        // Draw the apple
+        let apple = &Mesh::new_circle(
+            ctx,
+            graphics::DrawMode::Fill(graphics::FillOptions::default()),
+            self.apple.as_vec2() * scale_vec + center_dim + self.top_left,
+            radius,
+            CIRCLE_TOLERANCE,
+            Color::RED,
+        ).unwrap();
+        graphics::draw(
+            ctx,
+            apple,
+            graphics::DrawParam::default(),
+        )?;
 
         // Draw score
         graphics::queue_text(
