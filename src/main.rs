@@ -10,9 +10,9 @@ use glam::{IVec2, Vec2};
 use std::collections::LinkedList;
 
 const TARGET_FPS: u32 = 60;
-const STARTING_FRAME_DELAY: u8 = 15;
-const DIMENSIONS: Vec2 = glam::const_vec2!([76.0, 45.0]);
-const SCORE_STRIP: f32 = 4.0;
+const STARTING_FRAME_DELAY: u8 = 12;
+const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
+const SCORE_STRIP: i32 = 4;
 
 fn main() {
     let (tmp_ctx, _) = ContextBuilder::new("", "")
@@ -58,13 +58,16 @@ enum Direction {
 impl Game {
     pub fn new(ctx: &mut Context) -> Game {
         let (width, height) = graphics::size(&ctx);
-        let total_dim_y = DIMENSIONS.y + SCORE_STRIP;
+        let total_dim_y = DIMENSIONS.y as f32 + SCORE_STRIP as f32;
         let (ratio_x, ratio_y) = (
-            width as f32 / DIMENSIONS.x,
+            width as f32 / DIMENSIONS.x as f32,
             height as f32 / total_dim_y,
         );
         let (dim, top_left) = if ratio_y < ratio_x {
-            (ratio_y, Vec2::new((width - ratio_y * DIMENSIONS.x) / 2.0, 0.0))
+            (
+                ratio_y,
+                Vec2::new((width - ratio_y * DIMENSIONS.x as f32) / 2.0, 0.0),
+            )
         } else {
             (ratio_x, Vec2::new(0.0, 0.0))
         };
@@ -73,8 +76,8 @@ impl Game {
             top_left,
             score: 0,
             snake: LinkedList::from([IVec2::new(
-                (DIMENSIONS.x as u32 / 2) as i32,
-                (DIMENSIONS.y  as u32 / 2) as i32,
+                DIMENSIONS.x as i32 / 2,
+                DIMENSIONS.y as i32 / 2,
             )]),
             direction: None,
             frame: 0,
@@ -121,12 +124,14 @@ impl EventHandler for Game {
             return Ok(());
         }
 
+        // Update game state
         while timer::check_update_time(ctx, TARGET_FPS) {
             self.frame += 1;
             if self.frame < self.frame_delay {
                 return Ok(());
             }
 
+            // Update direction
             self.frame = 0;
             let (dx, dy) = match self.direction {
                 Some(Direction::UP) => (0, -1),
@@ -135,9 +140,15 @@ impl EventHandler for Game {
                 Some(Direction::RIGHT) => (1, 0),
                 _ => panic!("unexpected snake direction"),
             };
+
+            // Move snake
             let head = self.snake.back().unwrap();
-            let (head_x, head_y) = (head.x, head.y);
-            self.snake.push_back(IVec2::new(head_x + dx, head_y + dy));
+            let (new_head_x, new_head_y) = (head.x + dx, head.y + dy);
+            if new_head_x < 0 || new_head_x >= DIMENSIONS.x ||
+                new_head_y < 0 || new_head_y >= DIMENSIONS.y {
+                panic!("game over");
+            }
+            self.snake.push_back(IVec2::new(new_head_x, new_head_y));
             self.snake.pop_front();
         }
         Ok(())
@@ -153,8 +164,8 @@ impl EventHandler for Game {
             graphics::Rect::new(
                 self.top_left.x,
                 self.top_left.y,
-                self.dim * DIMENSIONS.x,
-                self.dim * DIMENSIONS.y,
+                self.dim * DIMENSIONS.x as f32,
+                self.dim * DIMENSIONS.y as f32,
             ),
             Color::BLACK,
         ).unwrap();
@@ -195,7 +206,7 @@ impl EventHandler for Game {
             ),
             Vec2::new(
                 self.top_left.x + self.dim,
-                self.top_left.y + self.dim * DIMENSIONS.y + self.dim,
+                self.top_left.y + self.dim * DIMENSIONS.y as f32 + self.dim,
             ),
             Some(Color::WHITE),
         );
