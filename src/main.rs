@@ -46,8 +46,7 @@ fn main() {
 }
 
 struct Game {
-    dim: f32,
-    top_left: Vec2,
+    geo_config: GeoConfig,
     score: u32,
     snake: Snake,
     apple: IVec2,
@@ -56,6 +55,11 @@ struct Game {
     frame_data: FrameData,
     open_squares: Vec<IVec2>,
     rng: rand::rngs::ThreadRng,
+}
+
+struct GeoConfig {
+    dim: f32,
+    top_left: Vec2,
 }
 
 struct Snake {
@@ -191,8 +195,10 @@ impl Game {
             }
         );
         let mut game = Game {
-            dim,
-            top_left,
+            geo_config: GeoConfig {
+                dim,
+                top_left,
+            },
             score: 0,
             snake: Snake::new(IVec2::new(
                 DIMENSIONS.x as i32 / 2,
@@ -301,8 +307,10 @@ impl EventHandler for Game {
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult<()> {
         graphics::clear(ctx, Color::from_rgb_u32(0x232528));
-        let radius = self.dim / 2.0;
-        let scale_vec = glam::const_vec2!([self.dim, self.dim]);
+        let dim = self.geo_config.dim;
+        let top_left = self.geo_config.top_left;
+        let radius = dim / 2.0;
+        let scale_vec = glam::const_vec2!([dim, dim]);
         let center_dim = glam::const_vec2!([radius, radius]);
 
         // Draw play area
@@ -310,10 +318,10 @@ impl EventHandler for Game {
             ctx,
             graphics::DrawMode::Fill(graphics::FillOptions::default()),
             graphics::Rect::new(
-                self.top_left.x,
-                self.top_left.y,
-                self.dim * DIMENSIONS.x as f32,
-                self.dim * DIMENSIONS.y as f32,
+                top_left.x,
+                top_left.y,
+                dim * DIMENSIONS.x as f32,
+                dim * DIMENSIONS.y as f32,
             ),
             Color::BLACK,
         ).unwrap();
@@ -326,14 +334,14 @@ impl EventHandler for Game {
         // Draw the snake
         for pos in self.snake.iter() {
             let px_pos =
-                (*pos).as_vec2() * scale_vec + self.top_left;
+                (*pos).as_vec2() * scale_vec + top_left;
             let body = &Mesh::new_polygon(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
                 &[
                     px_pos + Vec2::new(radius, 0.0),
-                    px_pos + Vec2::new(self.dim, radius),
-                    px_pos + Vec2::new(radius, self.dim),
+                    px_pos + Vec2::new(dim, radius),
+                    px_pos + Vec2::new(radius, dim),
                     px_pos + Vec2::new(0.0, radius),
                 ],
                 Color::GREEN,
@@ -349,7 +357,7 @@ impl EventHandler for Game {
         let apple = &Mesh::new_circle(
             ctx,
             graphics::DrawMode::Fill(graphics::FillOptions::default()),
-            self.apple.as_vec2() * scale_vec + center_dim + self.top_left,
+            self.apple.as_vec2() * scale_vec + center_dim + top_left,
             radius,
             CIRCLE_TOLERANCE,
             Color::RED,
@@ -365,11 +373,11 @@ impl EventHandler for Game {
             ctx,
             &Text::new(self.score.to_string()).set_font(
                 graphics::Font::default(),
-                graphics::PxScale::from(self.dim * 2.0),
+                graphics::PxScale::from(dim * 2.0),
             ),
             Vec2::new(
-                self.top_left.x + self.dim,
-                self.top_left.y + self.dim * DIMENSIONS.y as f32 + self.dim,
+                top_left.x + dim,
+                top_left.y + dim * DIMENSIONS.y as f32 + dim,
             ),
             Some(Color::WHITE),
         );
