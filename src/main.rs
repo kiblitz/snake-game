@@ -15,9 +15,17 @@ use std::vec::Vec;
 const TARGET_FPS: u32 = 60;
 const STARTING_FRAME_DELAY: u8 = 12;
 const FRAME_DELAY_DECAY: f32 = 0.9;
+const FRAME_DELAY_INC: f32 = 1.4;
+
+const BB_GEN_FRAMES: u32 = 640;
+
 const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
 const SCORE_STRIP: i32 = 4;
-const CIRCLE_TOLERANCE: f32 = 4.0;
+
+const APPLE_CIRCLE_TOLERANCE: f32 = 5.0;
+const BB_CIRCLE_TOLERANCE: f32 = 1.0;
+
+const OFF_LIMITS_RANGE: i32 = 2;
 
 fn main() {
     let (tmp_ctx, _) = ContextBuilder::new("", "")
@@ -50,6 +58,7 @@ struct Game {
     score: u32,
     snake: Snake,
     apple: IVec2,
+    blueberry: Option<IVec2>,
     buffered_direction: Option<Direction>,
     direction: Option<Direction>,
     frame_data: FrameData,
@@ -71,6 +80,7 @@ struct Snake {
 struct FrameData {
     frame: u8,
     frame_delay: f32,
+    bb_frame: u32,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -103,8 +113,8 @@ impl Snake {
         }
         self.body.push_back(pos);
         self.set.insert(pos);
-        for x in -1..=1 {
-            for y in -1..=1 {
+        for x in -OFF_LIMITS_RANGE..=OFF_LIMITS_RANGE {
+            for y in -OFF_LIMITS_RANGE..=OFF_LIMITS_RANGE {
                 let delta = glam::const_ivec2!([x, y]);
                 let new_pos = pos + delta;
                 let new_count = match self.occupied.get(&new_pos) {
@@ -119,8 +129,8 @@ impl Snake {
     fn shrink(&mut self) {
         let elem = self.body.pop_front().unwrap();
         self.set.remove(&elem);
-        for x in -1..=1 {
-            for y in -1..=1 {
+        for x in -OFF_LIMITS_RANGE..=OFF_LIMITS_RANGE {
+            for y in -OFF_LIMITS_RANGE..=OFF_LIMITS_RANGE {
                 let delta = glam::const_ivec2!([x, y]);
                 let new_pos = elem + delta;
                 let count = *self.occupied.get(&new_pos).unwrap();
@@ -143,6 +153,7 @@ impl FrameData {
         Self {
             frame: 0,
             frame_delay: STARTING_FRAME_DELAY as f32,
+            bb_frame: 0,
         }
     }
 
@@ -153,6 +164,19 @@ impl FrameData {
     fn time_to_update(&mut self) -> bool {
         if self.frame >= self.frame_delay.ceil() as u8 {
             self.frame = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn next_bb_frame(&mut self) {
+        self.bb_frame += 1;
+    }
+
+    fn time_to_gen_bb(&mut self) -> bool {
+        if self.bb_frame >= BB_GEN_FRAMES {
+            self.bb_frame = 0;
             true
         } else {
             false
@@ -205,6 +229,7 @@ impl Game {
                 DIMENSIONS.y as i32 / 2,
             )),
             apple: invalid_coord(),
+            blueberry: None,
             buffered_direction: None,
             direction: None,
             frame_data: FrameData::new(),
@@ -219,7 +244,8 @@ impl Game {
         let index = self.rng.gen_range(0..self.open_squares.len());
         let sq = self.open_squares[index];
         if self.snake.is_off_limits(sq) ||
-            self.apple == sq
+            self.apple == sq ||
+            (self.blueberry != None && self.blueberry.unwrap() == sq)
         {
             self.gen_open_square()
         } else {
@@ -301,6 +327,20 @@ impl EventHandler for Game {
             } else {
                 self.snake.shrink();
             }
+
+            // Blueberry collection
+            if let Some(blueberry) = self.blueberry {
+                if new_head == blueberry {
+                    self.blueberry = None;
+                    self.score += 1;
+                    self.frame_data.frame_delay += FRAME_DELAY_INC;
+                }
+            } else {
+                self.frame_data.next_bb_frame();
+                if self.frame_data.time_to_gen_bb() {
+                    self.blueberry = Some(self.gen_open_square());
+                }
+            }
         }
         Ok(())
     }
@@ -335,7 +375,7 @@ impl EventHandler for Game {
         for pos in self.snake.iter() {
             let px_pos =
                 (*pos).as_vec2() * scale_vec + top_left;
-            let body = &Mesh::new_polygon(
+            let body_graphic = &Mesh::new_polygon(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
                 &[
@@ -348,25 +388,41 @@ impl EventHandler for Game {
             ).unwrap();
             graphics::draw(
                 ctx,
-                body,
+                body_graphic,
                 graphics::DrawParam::default(),
             )?;
         }
 
-        // Draw the apple
-        let apple = &Mesh::new_circle(
+        // Draw foods
+        let apple_graphic = &Mesh::new_circle(
             ctx,
             graphics::DrawMode::Fill(graphics::FillOptions::default()),
             self.apple.as_vec2() * scale_vec + center_dim + top_left,
             radius,
-            CIRCLE_TOLERANCE,
+            APPLE_CIRCLE_TOLERANCE,
             Color::RED,
         ).unwrap();
         graphics::draw(
             ctx,
-            apple,
+            apple_graphic,
             graphics::DrawParam::default(),
         )?;
+
+        if let Some(blueberry) = self.blueberry {
+            let blueberry_graphic = &Mesh::new_circle(
+                ctx,
+                graphics::DrawMode::Fill(graphics::FillOptions::default()),
+                blueberry.as_vec2() * scale_vec + center_dim + top_left,
+                radius,
+                BB_CIRCLE_TOLERANCE,
+                Color::from_rgb_u32(0x4287f5),
+            ).unwrap();
+            graphics::draw(
+                ctx,
+                blueberry_graphic,
+                graphics::DrawParam::default(),
+            )?;
+        }
 
         // Draw score
         graphics::queue_text(
