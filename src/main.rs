@@ -9,7 +9,7 @@ use glam::{IVec2, Vec2};
 
 use rand::Rng;
 
-use std::collections::{HashMap, LinkedList};
+use std::collections::{LinkedList, HashMap, HashSet};
 use std::vec::Vec;
 
 const TARGET_FPS: u32 = 60;
@@ -59,6 +59,7 @@ struct Game {
 
 struct Snake {
     body: LinkedList<IVec2>,
+    set: HashSet<IVec2>,
     occupied: HashMap<IVec2, u8>,
 }
 
@@ -76,6 +77,7 @@ impl Snake {
     fn new(start_pos: IVec2) -> Self {
         let mut snake = Self {
             body: LinkedList::new(),
+            set: HashSet::new(),
             occupied: HashMap::new(),
         };
         snake.grow(start_pos);
@@ -91,7 +93,11 @@ impl Snake {
     }
 
     fn grow(&mut self, pos: IVec2) {
+        if self.set.contains(&pos) && *self.body.front().unwrap() != pos {
+            panic!("game over");
+        }
         self.body.push_back(pos);
+        self.set.insert(pos);
         for x in -1..=1 {
             for y in -1..=1 {
                 let delta = glam::const_ivec2!([x, y]);
@@ -107,6 +113,7 @@ impl Snake {
 
     fn shrink(&mut self) {
         let elem = self.body.pop_front().unwrap();
+        self.set.remove(&elem);
         for x in -1..=1 {
             for y in -1..=1 {
                 let delta = glam::const_ivec2!([x, y]);
@@ -277,6 +284,7 @@ impl EventHandler for Game {
             // Apple collection
             if new_head == self.apple {
                 self.apple = self.gen_open_square();
+                self.score += 1;
             } else {
                 self.snake.shrink();
             }
