@@ -7,7 +7,7 @@ use ggez::timer;
 
 use glam::{IVec2, Vec2};
 
-use std::collections::LinkedList;
+use std::collections::{HashSet, LinkedList};
 
 const TARGET_FPS: u32 = 60;
 const STARTING_FRAME_DELAY: u8 = 12;
@@ -44,8 +44,19 @@ struct Game {
     dim: f32,
     top_left: Vec2,
     score: u32,
-    snake: LinkedList<IVec2>,
+    snake: Snake,
+    apple: IVec2,
+    buffered_direction: Option<Direction>,
     direction: Option<Direction>,
+    frame_data: FrameData,
+}
+
+struct Snake {
+    body: LinkedList<IVec2>,
+    set: HashSet<IVec2>,
+}
+
+struct FrameData {
     frame: u8,
     frame_delay: u8,
 }
@@ -53,6 +64,55 @@ struct Game {
 #[derive(Copy, Clone, PartialEq)]
 enum Direction {
     UP, DOWN, LEFT, RIGHT,
+}
+
+impl Snake {
+    fn new(start_pos: IVec2) -> Self {
+        Self {
+            body: LinkedList::from([start_pos]),
+            set: HashSet::from([start_pos]),
+        }
+    }
+
+    fn head(&self) -> IVec2 {
+        *self.body.back().unwrap()
+    }
+
+    fn iter(&self) -> std::collections::linked_list::Iter<'_, IVec2> {
+        self.body.iter()
+    }
+
+    fn grow(&mut self, pos: IVec2) {
+        self.body.push_back(pos);
+        self.set.insert(pos);
+    }
+
+    fn shrink(&mut self) {
+        let elem = self.body.pop_front().unwrap();
+        self.set.remove(&elem);
+    }
+}
+
+impl FrameData {
+    fn new() -> Self {
+        Self {
+            frame: 0,
+            frame_delay: STARTING_FRAME_DELAY,
+        }
+    }
+
+    fn next_frame(&mut self) {
+        self.frame += 1;
+    }
+
+    fn time_to_update(&mut self) -> bool {
+        if self.frame >= self.frame_delay {
+            self.frame = 0;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl Game {
@@ -75,13 +135,14 @@ impl Game {
             dim,
             top_left,
             score: 0,
-            snake: LinkedList::from([IVec2::new(
+            snake: Snake::new(IVec2::new(
                 DIMENSIONS.x as i32 / 2,
                 DIMENSIONS.y as i32 / 2,
-            )]),
+            )),
+            apple: glam::const_ivec2!([0, 0]),
+            buffered_direction: None,
             direction: None,
-            frame: 0,
-            frame_delay: STARTING_FRAME_DELAY,
+            frame_data: FrameData::new(),
         }
     }
 }
@@ -109,30 +170,30 @@ impl EventHandler for Game {
         let vert_states = [None, Some(Direction::UP), Some(Direction::DOWN)];
         let hor_states = [None, Some(Direction::LEFT), Some(Direction::RIGHT)];
         if left(ctx) && !right(ctx) && vert_states.contains(&self.direction) {
-            self.direction = Some(Direction::LEFT);
+            self.buffered_direction = Some(Direction::LEFT);
         } else if right(ctx) && !left(ctx) &&
             vert_states.contains(&self.direction) {
-            self.direction = Some(Direction::RIGHT);
+            self.buffered_direction = Some(Direction::RIGHT);
         } else if up(ctx) && !down(ctx) &&
             hor_states.contains(&self.direction) {
-            self.direction = Some(Direction::UP);
+            self.buffered_direction = Some(Direction::UP);
         } else if down(ctx) && !up(ctx) &&
             hor_states.contains(&self.direction) {
-            self.direction = Some(Direction::DOWN);
+            self.buffered_direction = Some(Direction::DOWN);
         }
-        if self.direction == None {
+        if self.buffered_direction == None {
             return Ok(());
         }
 
         // Update game state
         while timer::check_update_time(ctx, TARGET_FPS) {
-            self.frame += 1;
-            if self.frame < self.frame_delay {
+            self.frame_data.next_frame();
+            if !self.frame_data.time_to_update() {
                 return Ok(());
             }
 
             // Update direction
-            self.frame = 0;
+            self.direction = self.buffered_direction;
             let (dx, dy) = match self.direction {
                 Some(Direction::UP) => (0, -1),
                 Some(Direction::DOWN) => (0, 1),
@@ -142,14 +203,14 @@ impl EventHandler for Game {
             };
 
             // Move snake
-            let head = self.snake.back().unwrap();
+            let head = self.snake.head();
             let (new_head_x, new_head_y) = (head.x + dx, head.y + dy);
             if new_head_x < 0 || new_head_x >= DIMENSIONS.x ||
                 new_head_y < 0 || new_head_y >= DIMENSIONS.y {
                 panic!("game over");
             }
-            self.snake.push_back(IVec2::new(new_head_x, new_head_y));
-            self.snake.pop_front();
+            self.snake.grow(IVec2::new(new_head_x, new_head_y));
+            self.snake.shrink();
         }
         Ok(())
     }
