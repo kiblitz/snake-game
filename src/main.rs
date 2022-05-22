@@ -14,6 +14,7 @@ use std::vec::Vec;
 
 const TARGET_FPS: u32 = 60;
 const STARTING_FRAME_DELAY: u8 = 12;
+const FRAME_DELAY_DECAY: f32 = 0.9;
 const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
 const SCORE_STRIP: i32 = 4;
 const CIRCLE_TOLERANCE: f32 = 4.0;
@@ -65,7 +66,7 @@ struct Snake {
 
 struct FrameData {
     frame: u8,
-    frame_delay: u8,
+    frame_delay: f32,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -137,7 +138,7 @@ impl FrameData {
     fn new() -> Self {
         Self {
             frame: 0,
-            frame_delay: STARTING_FRAME_DELAY,
+            frame_delay: STARTING_FRAME_DELAY as f32,
         }
     }
 
@@ -146,13 +147,17 @@ impl FrameData {
     }
 
     fn time_to_update(&mut self) -> bool {
-        if self.frame >= self.frame_delay {
+        if self.frame >= self.frame_delay.ceil() as u8 {
             self.frame = 0;
             true
         } else {
             false
         }
     }
+}
+
+fn invalid_coord() -> IVec2 {
+    glam::const_ivec2!([-1, -1])
 }
 
 impl Game {
@@ -193,7 +198,7 @@ impl Game {
                 DIMENSIONS.x as i32 / 2,
                 DIMENSIONS.y as i32 / 2,
             )),
-            apple: glam::const_ivec2!([0, 0]),
+            apple: invalid_coord(),
             buffered_direction: None,
             direction: None,
             frame_data: FrameData::new(),
@@ -207,8 +212,9 @@ impl Game {
     fn gen_open_square(&mut self) -> IVec2 {
         let index = self.rng.gen_range(0..self.open_squares.len());
         let sq = self.open_squares[index];
-        if self.snake.is_off_limits(sq) {
-            self.open_squares.swap_remove(index);
+        if self.snake.is_off_limits(sq) ||
+            self.apple == sq
+        {
             self.gen_open_square()
         } else {
             sq
@@ -285,6 +291,7 @@ impl EventHandler for Game {
             if new_head == self.apple {
                 self.apple = self.gen_open_square();
                 self.score += 1;
+                self.frame_data.frame_delay *= FRAME_DELAY_DECAY;
             } else {
                 self.snake.shrink();
             }
