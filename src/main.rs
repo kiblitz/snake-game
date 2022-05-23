@@ -25,7 +25,7 @@ const SCORE_STRIP: i32 = 4;
 const APPLE_CIRCLE_TOLERANCE: f32 = 5.0;
 const BB_CIRCLE_TOLERANCE: f32 = 1.0;
 
-const OFF_LIMITS_RANGE: i32 = 2;
+const OFF_LIMITS_RANGE: i32 = 3;
 
 fn main() {
     let (tmp_ctx, _) = ContextBuilder::new("", "")
@@ -56,6 +56,7 @@ fn main() {
 struct Game {
     geo_config: GeoConfig,
     score: u32,
+    live: bool,
     snake: Snake,
     apple: IVec2,
     blueberry: Option<IVec2>,
@@ -107,9 +108,9 @@ impl Snake {
         self.body.iter()
     }
 
-    fn grow(&mut self, pos: IVec2) {
+    fn grow(&mut self, pos: IVec2) -> bool {
         if self.set.contains(&pos) && *self.body.front().unwrap() != pos {
-            panic!("game over");
+            return false;
         }
         self.body.push_back(pos);
         self.set.insert(pos);
@@ -124,6 +125,7 @@ impl Snake {
                 self.occupied.insert(new_pos, new_count);
             }
         }
+        true
     }
 
     fn shrink(&mut self) {
@@ -224,6 +226,7 @@ impl Game {
                 top_left,
             },
             score: 0,
+            live: true,
             snake: Snake::new(IVec2::new(
                 DIMENSIONS.x as i32 / 2,
                 DIMENSIONS.y as i32 / 2,
@@ -273,6 +276,13 @@ fn down(ctx: &mut Context) -> bool {
 
 impl EventHandler for Game {
     fn update(&mut self, ctx: &mut Context) -> GameResult<()> {
+        if !self.live {
+            if keyboard::is_key_pressed(ctx, KeyCode::Space) {
+                *self = Game::new(ctx);
+            }
+            return Ok(());
+        }
+
         // Set snake direction
         let vert_states = [None, Some(Direction::UP), Some(Direction::DOWN)];
         let hor_states = [None, Some(Direction::LEFT), Some(Direction::RIGHT)];
@@ -314,10 +324,14 @@ impl EventHandler for Game {
             let (new_head_x, new_head_y) = (head.x + dx, head.y + dy);
             if new_head_x < 0 || new_head_x >= DIMENSIONS.x ||
                 new_head_y < 0 || new_head_y >= DIMENSIONS.y {
-                panic!("game over");
+                self.live = false;
+                return Ok(());
             }
             let new_head = IVec2::new(new_head_x, new_head_y);
-            self.snake.grow(new_head);
+            if !self.snake.grow(new_head) {
+                self.live = false;
+                return Ok(());
+            }
 
             // Apple collection
             if new_head == self.apple {
@@ -425,25 +439,59 @@ impl EventHandler for Game {
         }
 
         // Draw score
+        let text_size = dim * 2.0;
         graphics::queue_text(
             ctx,
             &Text::new(self.score.to_string()).set_font(
                 graphics::Font::default(),
-                graphics::PxScale::from(dim * 2.0),
+                graphics::PxScale::from(text_size),
             ),
             Vec2::new(
-                top_left.x + dim,
-                top_left.y + dim * DIMENSIONS.y as f32 + dim,
+                top_left.x + text_size / 2.0,
+                top_left.y + dim * DIMENSIONS.y as f32 + text_size / 2.0,
             ),
             Some(Color::WHITE),
         );
+
+        // Game over screen
+        let big_text_size = dim * 4.0;
+        if !self.live {
+            graphics::queue_text(
+                ctx,
+                &Text::new("GAME OVER").set_font(
+                    graphics::Font::default(),
+                    graphics::PxScale::from(big_text_size),
+                ),
+                Vec2::new(
+                    top_left.x + dim * DIMENSIONS.x as f32 / 2.0
+                        - big_text_size * 2.25,
+                    top_left.y + dim * DIMENSIONS.y as f32 / 2.0 - dim * 2.0
+                        - big_text_size / 2.0,
+                ),
+                Some(Color::WHITE),
+            );
+            graphics::queue_text(
+                ctx,
+                &Text::new("space to continue").set_font(
+                    graphics::Font::default(),
+                    graphics::PxScale::from(text_size),
+                ),
+                Vec2::new(
+                    top_left.x + dim * DIMENSIONS.x as f32 / 2.0
+                        - text_size * 4.25,
+                    top_left.y + dim * DIMENSIONS.y as f32 / 2.0
+                        - text_size / 2.0,
+                ),
+                Some(Color::WHITE),
+            );
+        }
+
         graphics::draw_queued_text(
             ctx,
             graphics::DrawParam::default(),
             None,
             graphics::FilterMode::Linear,
         )?;
-
         graphics::present(ctx)
     }
 }
