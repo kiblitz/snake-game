@@ -19,8 +19,8 @@ const FRAME_DELAY_INC: f32 = 1.4;
 
 const BB_GEN_FRAMES: u32 = 720;
 const GA_GEN_FRAMES: u32 = 1080;
-const OR_GEN_FRAMES: u32 = 640;
-const SW_GEN_FRAMES: u32 = 560;
+const OR_GEN_FRAMES: u32 = 560;
+const SW_GEN_FRAMES: u32 = 360;
 
 const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
 const SCORE_STRIP: i32 = 4;
@@ -28,6 +28,7 @@ const SCORE_STRIP: i32 = 4;
 const CIRCLE_TOLERANCE: f32 = 2.0;
 
 const GOLDEN_APPLE_WORTH: u32 = 10;
+const WALL_BREAK_WORTH: u32 = 3;
 const OFF_LIMITS_RANGE: i32 = 3;
 
 fn main() {
@@ -370,6 +371,7 @@ impl EventHandler for Game {
                 if self.shielded {
                     self.shielded = false;
                     self.stone_walls.remove(&new_head);
+                    self.score += WALL_BREAK_WORTH;
                 } else {
                     self.live = false;
                     return Ok(());
@@ -424,6 +426,7 @@ impl EventHandler for Game {
                 if new_head == orange {
                     self.orange = None;
                     self.shielded = true;
+                    self.score += 1;
                 }
             } else if !self.shielded {
                 self.frame_data.or_waiter.next_frame();
