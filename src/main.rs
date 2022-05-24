@@ -19,8 +19,8 @@ const FRAME_DELAY_INC: f32 = 1.4;
 
 const BB_GEN_FRAMES: u32 = 720;
 const GA_GEN_FRAMES: u32 = 1080;
-const OR_GEN_FRAMES: u32 = 560;
-const SW_GEN_FRAMES: u32 = 640;
+const OR_GEN_FRAMES: u32 = 640;
+const SW_GEN_FRAMES: u32 = 560;
 
 const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
 const SCORE_STRIP: i32 = 4;
@@ -453,8 +453,6 @@ impl EventHandler for Game {
         let dim = self.geo_config.dim;
         let top_left = self.geo_config.top_left;
         let radius = dim / 2.0;
-        let scale_vec = glam::const_vec2!([dim, dim]);
-        let center_dim = glam::const_vec2!([radius, radius]);
 
         // Draw play area
         let area = &Mesh::new_rectangle(
@@ -476,7 +474,7 @@ impl EventHandler for Game {
 
         // Draw the snake
         for pos in self.snake.iter() {
-            let px_pos = (*pos).as_vec2() * scale_vec + top_left;
+            let px_pos = (*pos).as_vec2() * dim + top_left;
             let body_graphic = &Mesh::new_polygon(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
@@ -495,7 +493,7 @@ impl EventHandler for Game {
             )?;
         }
         if self.shielded {
-            let px_pos = self.snake.head().as_vec2() * scale_vec + top_left;
+            let px_pos = self.snake.head().as_vec2() * dim + top_left;
             let head_graphic = &Mesh::new_polygon(
                 ctx,
                 graphics::DrawMode::Stroke(graphics::StrokeOptions::default()
@@ -514,12 +512,11 @@ impl EventHandler for Game {
                 head_graphic,
                 graphics::DrawParam::default(),
             )?;
-
         }
 
         // Draw stone walls
         for pos in &self.stone_walls {
-            let px_pos = (*pos).as_vec2() * scale_vec + top_left;
+            let px_pos = (*pos).as_vec2() * dim + top_left;
             let stone_wall_graphic = &Mesh::new_rectangle(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
@@ -542,7 +539,7 @@ impl EventHandler for Game {
         let apple_graphic = &Mesh::new_circle(
             ctx,
             graphics::DrawMode::Fill(graphics::FillOptions::default()),
-            self.apple.as_vec2() * scale_vec + center_dim + top_left,
+            self.apple.as_vec2() * dim + radius + top_left,
             radius,
             CIRCLE_TOLERANCE,
             Color::RED,
@@ -558,7 +555,7 @@ impl EventHandler for Game {
             let blueberry_graphic = &Mesh::new_circle(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
-                blueberry.as_vec2() * scale_vec + center_dim + top_left,
+                blueberry.as_vec2() * dim + radius + top_left,
                 radius,
                 CIRCLE_TOLERANCE,
                 Color::from_rgb_u32(0x4287f5),
@@ -572,13 +569,14 @@ impl EventHandler for Game {
 
         // Draw golden apple
         if let Some(golden_apple) = self.golden_apple {
+            let px_pos = golden_apple.as_vec2() * dim + radius + top_left;
             let golden_apple_graphic = &Mesh::new_circle(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
-                golden_apple.as_vec2() * scale_vec + center_dim + top_left,
+                px_pos,
                 radius,
                 CIRCLE_TOLERANCE,
-                Color::from_rgb_u32(0xffd700),
+                Color::YELLOW,
             ).unwrap();
             graphics::draw(
                 ctx,
@@ -589,17 +587,33 @@ impl EventHandler for Game {
 
         // Draw orange
         if let Some(orange) = self.orange {
+            let px_pos = orange.as_vec2() * dim + radius + top_left;
             let orange_graphic = &Mesh::new_circle(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
-                orange.as_vec2() * scale_vec + center_dim + top_left,
+                px_pos,
                 radius,
                 CIRCLE_TOLERANCE,
-                Color::from_rgb_u32(0xffa800),
+                Color::from_rgb_u32(0xff9900),
             ).unwrap();
             graphics::draw(
                 ctx,
                 orange_graphic,
+                graphics::DrawParam::default(),
+            )?;
+            let shield_graphic = &Mesh::new_circle(
+                ctx,
+                graphics::DrawMode::Stroke(graphics::StrokeOptions::default()
+                    .with_line_width(dim / 8.0)
+                ),
+                px_pos,
+                radius,
+                CIRCLE_TOLERANCE,
+                Color::from_rgb_u32(0xbfbfbf),
+            ).unwrap();
+            graphics::draw(
+                ctx,
+                shield_graphic,
                 graphics::DrawParam::default(),
             )?;
         }
