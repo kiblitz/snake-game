@@ -13,18 +13,21 @@ use std::collections::{LinkedList, HashMap, HashSet};
 use std::vec::Vec;
 
 const TARGET_FPS: u32 = 60;
-const STARTING_FRAME_DELAY: u8 = 12;
-const FRAME_DELAY_DECAY: f32 = 0.9;
+const STARTING_FRAME_DELAY: u8 = 5;
+const FRAME_DELAY_DECAY: f32 = 0.92;
 const FRAME_DELAY_INC: f32 = 1.4;
 
-const BB_GEN_FRAMES: u32 = 640;
+const BB_GEN_FRAMES: u32 = 720;
+const GA_GEN_FRAMES: u32 = 1080;
+const OR_GEN_FRAMES: u32 = 560;
+const SW_GEN_FRAMES: u32 = 640;
 
 const DIMENSIONS: IVec2 = glam::const_ivec2!([76, 45]);
 const SCORE_STRIP: i32 = 4;
 
-const APPLE_CIRCLE_TOLERANCE: f32 = 5.0;
-const BB_CIRCLE_TOLERANCE: f32 = 1.0;
+const CIRCLE_TOLERANCE: f32 = 2.0;
 
+const GOLDEN_APPLE_WORTH: u32 = 10;
 const OFF_LIMITS_RANGE: i32 = 3;
 
 fn main() {
@@ -57,9 +60,14 @@ struct Game {
     geo_config: GeoConfig,
     score: u32,
     live: bool,
+    shielded: bool,
     snake: Snake,
     apple: IVec2,
     blueberry: Option<IVec2>,
+    golden_apple: Option<IVec2>,
+    orange: Option<IVec2>,
+    stone_walls: HashSet<IVec2>,
+    grow_buffer: u32,
     buffered_direction: Option<Direction>,
     direction: Option<Direction>,
     frame_data: FrameData,
@@ -81,7 +89,15 @@ struct Snake {
 struct FrameData {
     frame: u8,
     frame_delay: f32,
-    bb_frame: u32,
+    bb_waiter: Waiter,
+    ga_waiter: Waiter,
+    or_waiter: Waiter,
+    sw_waiter: Waiter,
+}
+
+struct Waiter {
+    frame: u32,
+    update_freq: u32,
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -155,7 +171,10 @@ impl FrameData {
         Self {
             frame: 0,
             frame_delay: STARTING_FRAME_DELAY as f32,
-            bb_frame: 0,
+            bb_waiter: Waiter::new(BB_GEN_FRAMES),
+            ga_waiter: Waiter::new(GA_GEN_FRAMES),
+            or_waiter: Waiter::new(OR_GEN_FRAMES),
+            sw_waiter: Waiter::new(SW_GEN_FRAMES),
         }
     }
 
@@ -171,14 +190,23 @@ impl FrameData {
             false
         }
     }
+}
 
-    fn next_bb_frame(&mut self) {
-        self.bb_frame += 1;
+impl Waiter {
+    fn new(update_freq: u32) -> Self {
+        Self {
+            frame: 0,
+            update_freq,
+        }
     }
 
-    fn time_to_gen_bb(&mut self) -> bool {
-        if self.bb_frame >= BB_GEN_FRAMES {
-            self.bb_frame = 0;
+    fn next_frame(&mut self) {
+        self.frame += 1;
+    }
+
+    fn time_to_update(&mut self) -> bool {
+        if self.frame >= self.update_freq {
+            self.frame = 0;
             true
         } else {
             false
@@ -227,12 +255,17 @@ impl Game {
             },
             score: 0,
             live: true,
+            shielded: false,
             snake: Snake::new(IVec2::new(
                 DIMENSIONS.x as i32 / 2,
                 DIMENSIONS.y as i32 / 2,
             )),
             apple: invalid_coord(),
             blueberry: None,
+            golden_apple: None,
+            orange: None,
+            stone_walls: HashSet::new(),
+            grow_buffer: 0,
             buffered_direction: None,
             direction: None,
             frame_data: FrameData::new(),
@@ -248,7 +281,10 @@ impl Game {
         let sq = self.open_squares[index];
         if self.snake.is_off_limits(sq) ||
             self.apple == sq ||
-            (self.blueberry != None && self.blueberry.unwrap() == sq)
+            (self.blueberry != None && self.blueberry.unwrap() == sq) ||
+            (self.golden_apple != None && self.golden_apple.unwrap() == sq) ||
+            (self.orange != None && self.orange.unwrap() == sq) ||
+            self.stone_walls.contains(&sq)
         {
             self.gen_open_square()
         } else {
@@ -327,7 +363,20 @@ impl EventHandler for Game {
                 self.live = false;
                 return Ok(());
             }
+
+            // Check for stone wall collision
             let new_head = IVec2::new(new_head_x, new_head_y);
+            if self.stone_walls.contains(&new_head) {
+                if self.shielded {
+                    self.shielded = false;
+                    self.stone_walls.remove(&new_head);
+                } else {
+                    self.live = false;
+                    return Ok(());
+                }
+            }
+
+            // Check for border collision
             if !self.snake.grow(new_head) {
                 self.live = false;
                 return Ok(());
@@ -338,8 +387,7 @@ impl EventHandler for Game {
                 self.apple = self.gen_open_square();
                 self.score += 1;
                 self.frame_data.frame_delay *= FRAME_DELAY_DECAY;
-            } else {
-                self.snake.shrink();
+                self.grow_buffer += 1;
             }
 
             // Blueberry collection
@@ -350,10 +398,51 @@ impl EventHandler for Game {
                     self.frame_data.frame_delay += FRAME_DELAY_INC;
                 }
             } else {
-                self.frame_data.next_bb_frame();
-                if self.frame_data.time_to_gen_bb() {
+                self.frame_data.bb_waiter.next_frame();
+                if self.frame_data.bb_waiter.time_to_update() {
                     self.blueberry = Some(self.gen_open_square());
                 }
+            }
+
+            // Golden apple collection
+            if let Some(golden_apple) = self.golden_apple {
+                if new_head == golden_apple {
+                    self.golden_apple = None;
+                    self.score += GOLDEN_APPLE_WORTH;
+                    self.frame_data.frame_delay *= FRAME_DELAY_DECAY;
+                    self.grow_buffer += GOLDEN_APPLE_WORTH;
+                }
+            } else {
+                self.frame_data.ga_waiter.next_frame();
+                if self.frame_data.ga_waiter.time_to_update() {
+                    self.golden_apple = Some(self.gen_open_square());
+                }
+            }
+
+            // Orange collection
+            if let Some(orange) = self.orange {
+                if new_head == orange {
+                    self.orange = None;
+                    self.shielded = true;
+                }
+            } else if !self.shielded {
+                self.frame_data.or_waiter.next_frame();
+                if self.frame_data.or_waiter.time_to_update() {
+                    self.orange = Some(self.gen_open_square());
+                }
+            }
+
+            // Stone wall generator
+            self.frame_data.sw_waiter.next_frame();
+            if self.frame_data.sw_waiter.time_to_update() {
+                let new_wall = self.gen_open_square();
+                self.stone_walls.insert(new_wall);
+            }
+
+            if self.grow_buffer == 0 {
+                self.snake.shrink();
+            } else {
+                self.grow_buffer -= 1;
             }
         }
         Ok(())
@@ -387,8 +476,7 @@ impl EventHandler for Game {
 
         // Draw the snake
         for pos in self.snake.iter() {
-            let px_pos =
-                (*pos).as_vec2() * scale_vec + top_left;
+            let px_pos = (*pos).as_vec2() * scale_vec + top_left;
             let body_graphic = &Mesh::new_polygon(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
@@ -406,14 +494,57 @@ impl EventHandler for Game {
                 graphics::DrawParam::default(),
             )?;
         }
+        if self.shielded {
+            let px_pos = self.snake.head().as_vec2() * scale_vec + top_left;
+            let head_graphic = &Mesh::new_polygon(
+                ctx,
+                graphics::DrawMode::Stroke(graphics::StrokeOptions::default()
+                    .with_line_width(dim / 4.0)
+                ),
+                &[
+                    px_pos + Vec2::new(radius, 0.0),
+                    px_pos + Vec2::new(dim, radius),
+                    px_pos + Vec2::new(radius, dim),
+                    px_pos + Vec2::new(0.0, radius),
+                ],
+                Color::from_rgb_u32(0xbfbfbf),
+            ).unwrap();
+            graphics::draw(
+                ctx,
+                head_graphic,
+                graphics::DrawParam::default(),
+            )?;
 
-        // Draw foods
+        }
+
+        // Draw stone walls
+        for pos in &self.stone_walls {
+            let px_pos = (*pos).as_vec2() * scale_vec + top_left;
+            let stone_wall_graphic = &Mesh::new_rectangle(
+                ctx,
+                graphics::DrawMode::Fill(graphics::FillOptions::default()),
+                graphics::Rect::new(
+                    px_pos.x,
+                    px_pos.y,
+                    dim,
+                    dim,
+                ),
+                Color::from_rgb_u32(0xbfbfbf),
+            ).unwrap();
+            graphics::draw(
+                ctx,
+                stone_wall_graphic,
+                graphics::DrawParam::default(),
+            )?;
+        }
+
+        // Draw apple
         let apple_graphic = &Mesh::new_circle(
             ctx,
             graphics::DrawMode::Fill(graphics::FillOptions::default()),
             self.apple.as_vec2() * scale_vec + center_dim + top_left,
             radius,
-            APPLE_CIRCLE_TOLERANCE,
+            CIRCLE_TOLERANCE,
             Color::RED,
         ).unwrap();
         graphics::draw(
@@ -422,18 +553,53 @@ impl EventHandler for Game {
             graphics::DrawParam::default(),
         )?;
 
+        // Draw blueberry
         if let Some(blueberry) = self.blueberry {
             let blueberry_graphic = &Mesh::new_circle(
                 ctx,
                 graphics::DrawMode::Fill(graphics::FillOptions::default()),
                 blueberry.as_vec2() * scale_vec + center_dim + top_left,
                 radius,
-                BB_CIRCLE_TOLERANCE,
+                CIRCLE_TOLERANCE,
                 Color::from_rgb_u32(0x4287f5),
             ).unwrap();
             graphics::draw(
                 ctx,
                 blueberry_graphic,
+                graphics::DrawParam::default(),
+            )?;
+        }
+
+        // Draw golden apple
+        if let Some(golden_apple) = self.golden_apple {
+            let golden_apple_graphic = &Mesh::new_circle(
+                ctx,
+                graphics::DrawMode::Fill(graphics::FillOptions::default()),
+                golden_apple.as_vec2() * scale_vec + center_dim + top_left,
+                radius,
+                CIRCLE_TOLERANCE,
+                Color::from_rgb_u32(0xffd700),
+            ).unwrap();
+            graphics::draw(
+                ctx,
+                golden_apple_graphic,
+                graphics::DrawParam::default(),
+            )?;
+        }
+
+        // Draw orange
+        if let Some(orange) = self.orange {
+            let orange_graphic = &Mesh::new_circle(
+                ctx,
+                graphics::DrawMode::Fill(graphics::FillOptions::default()),
+                orange.as_vec2() * scale_vec + center_dim + top_left,
+                radius,
+                CIRCLE_TOLERANCE,
+                Color::from_rgb_u32(0xffa800),
+            ).unwrap();
+            graphics::draw(
+                ctx,
+                orange_graphic,
                 graphics::DrawParam::default(),
             )?;
         }
